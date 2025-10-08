@@ -13,6 +13,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
+  List<String> _interests = [];
   bool _loading = true;
 
   @override
@@ -40,12 +41,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .select()
           .eq('id', user.id)
           .maybeSingle();
-      // maybeSingle returns a PostgrestMap which behaves like Map<String, dynamic>
       setState(
         () => _profile = res != null
             ? Map<String, dynamic>.from(res as Map)
             : null,
       );
+
+      final interestsRes = await supabase
+          .from('user_interests')
+          .select('interest')
+          .eq('user_id', user.id);
+      if (interestsRes != null) {
+        setState(() {
+          _interests = (interestsRes as List)
+              .map((e) => e['interest'].toString())
+              .toList();
+        });
+      }
     } catch (e) {
       setState(() => _profile = null);
     } finally {
@@ -158,7 +170,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          if (bio != null && bio.isNotEmpty) Text(bio),
+                          if (bio != null && bio.isNotEmpty)
+                            Text(
+                              bio,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                                fontFamily: 'Inter',
+                              ),
+                            ),
                           const SizedBox(height: 12),
                           Row(
                             children: [
@@ -206,8 +226,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const SizedBox(height: 8),
-            const SizedBox(height: 12),
+            if (_interests.isNotEmpty)
+              Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Interests',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Inter',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _interests.map((interest) {
+                          return Chip(
+                            label: Text(interest),
+                            backgroundColor: const Color(0xFF6A5AE0).withOpacity(0.1),
+                            labelStyle: const TextStyle(
+                              color: Color(0xFF6A5AE0),
+                              fontFamily: 'Inter',
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(

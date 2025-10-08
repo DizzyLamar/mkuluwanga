@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/app_main_bar.dart';
+import 'create_resource_screen.dart';
+import 'resource_detail_screen.dart';
 
 class MentorDashboardScreen extends StatefulWidget {
   const MentorDashboardScreen({super.key});
@@ -13,14 +15,8 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
   late final Future<List<dynamic>> _requestsFuture;
   late Future<List<Map<String, dynamic>>> _activeMenteesFuture;
   late Future<Map<String, dynamic>> _analyticsFuture;
+  late Future<List<Map<String, dynamic>>> _resourcesFuture;
   final _supabase = Supabase.instance.client;
-
-  // Resource creation form controllers
-  final _titleController = TextEditingController();
-  final _summaryController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _coverImageController = TextEditingController();
-  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -28,6 +24,7 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
     _requestsFuture = _fetchRequests();
     _activeMenteesFuture = _fetchActiveMentees();
     _analyticsFuture = _fetchAnalytics();
+    _resourcesFuture = _fetchMyResources();
   }
 
   Future<List<dynamic>> _fetchRequests() async {
@@ -204,6 +201,20 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
     }
   }
 
+  Future<List<Map<String, dynamic>>> _fetchMyResources() async {
+    try {
+      final mentorId = _supabase.auth.currentUser!.id;
+      final response = await _supabase
+          .from('resources')
+          .select('id, title, summary, cover_image_url, created_at')
+          .eq('author_id', mentorId)
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(response as List);
+    } catch (e) {
+      return [];
+    }
+  }
+
   Future<void> _handleRequest(String requestId, String newStatus) async {
     try {
       // Update the request status
@@ -265,6 +276,7 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
         _requestsFuture = _fetchRequests();
         _analyticsFuture = _fetchAnalytics();
         _activeMenteesFuture = _fetchActiveMentees();
+        _resourcesFuture = _fetchMyResources();
       });
     } catch (e) {
       if (mounted) {
@@ -275,25 +287,20 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
     }
   }
 
-  Future<void> _createResource() async {
-    setState(() { _isSubmitting = true; });
-    final authorId = _supabase.auth.currentUser!.id;
-    await _supabase.from('resources').insert({
-      'title': _titleController.text.trim(),
-      'summary': _summaryController.text.trim(),
-      'content': _contentController.text.trim(),
-      'cover_image_url': _coverImageController.text.trim(),
-      'author_id': authorId,
-    });
-    setState(() {
-      _isSubmitting = false;
-      _analyticsFuture = _fetchAnalytics();
-    });
-    _titleController.clear();
-    _summaryController.clear();
-    _contentController.clear();
-    _coverImageController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Resource published!')));
+  Future<void> _navigateToCreateResource() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CreateResourceScreen(),
+      ),
+    );
+
+    if (result == true) {
+      setState(() {
+        _analyticsFuture = _fetchAnalytics();
+        _resourcesFuture = _fetchMyResources();
+      });
+    }
   }
 
   @override
@@ -310,6 +317,7 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
             _analyticsFuture = _fetchAnalytics();
             _activeMenteesFuture = _fetchActiveMentees();
             _requestsFuture = _fetchRequests();
+            _resourcesFuture = _fetchMyResources();
           });
         },
         child: SingleChildScrollView(
@@ -652,6 +660,134 @@ class _MentorDashboardScreenState extends State<MentorDashboardScreen> {
                           children: requests
                               .map((request) => _buildRequestCard(request: request))
                               .toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 32),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildSectionTitle('My Resources'),
+                        ElevatedButton.icon(
+                          onPressed: _navigateToCreateResource,
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Create'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6A5AE0),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _resourcesFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        if (snapshot.hasError) {
+                          return const Center(child: Text('Error loading resources'));
+                        }
+                        final resources = snapshot.data ?? [];
+                        if (resources.isEmpty) {
+                          return Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.article, size: 48, color: Colors.grey[400]),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'No resources created yet',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        return Column(
+                          children: resources.map((resource) {
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              child: ListTile(
+                                leading: resource['cover_image_url'] != null
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          resource['cover_image_url'],
+                                          width: 60,
+                                          height: 60,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return Container(
+                                              width: 60,
+                                              height: 60,
+                                              color: Colors.grey[200],
+                                              child: const Icon(Icons.article),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                    : Container(
+                                        width: 60,
+                                        height: 60,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF6A5AE0).withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(
+                                          Icons.article,
+                                          color: Color(0xFF6A5AE0),
+                                        ),
+                                      ),
+                                title: Text(
+                                  resource['title'] ?? '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontFamily: 'Inter',
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  resource['summary'] ?? '',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontFamily: 'Inter'),
+                                ),
+                                onTap: () async {
+                                  final fullResource = await _supabase
+                                      .from('resources')
+                                      .select('*, author:users!author_id(full_name)')
+                                      .eq('id', resource['id'])
+                                      .single();
+                                  if (mounted) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => ResourceDetailScreen(
+                                          resource: Map<String, dynamic>.from({
+                                            ...fullResource,
+                                            'author_name': fullResource['author']?['full_name'],
+                                          }),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            );
+                          }).toList(),
                         );
                       },
                     ),

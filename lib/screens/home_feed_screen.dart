@@ -7,10 +7,9 @@ import '../widgets/post_card.dart';
 import 'create_post_screen.dart';
 import 'interest_matching_screen.dart';
 import 'all_posts_screen.dart';
+import 'resource_detail_screen.dart';
+import 'user_profile_view_screen.dart';
 import '../services/cache_service.dart';
-
-// ⚠️ IMPORTANT: Initialize the Supabase client instance once (e.g., in main.dart)
-// final supabase = Supabase.instance.client;
 
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
@@ -22,7 +21,6 @@ class HomeFeedScreen extends StatefulWidget {
 class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAliveClientMixin {
   final _supabase = Supabase.instance.client;
   final _cache = CacheService();
-  // Using late and initializing in initState is the correct pattern.
   late Future<List<Map<String, dynamic>>> _postsFuture;
   late Future<List<Map<String, dynamic>>> _resourcesFuture;
 
@@ -36,15 +34,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   }
 
   void _loadData() {
-    // 1. Check for the session/user before fetching
     if (_supabase.auth.currentUser == null) {
-      // If no user, set futures to an empty list immediately
       _postsFuture = Future.value([]);
       _resourcesFuture = _fetchResources();
       return;
     }
 
-    // 2. Load data if user is present
     _postsFuture = _fetchPosts();
     _resourcesFuture = _fetchResources();
   }
@@ -52,15 +47,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   Future<List<Map<String, dynamic>>> _fetchPosts() async {
     final userId = _supabase.auth.currentUser?.id;
 
-    // 💡 Logging: Essential check for debugging.
     if (userId == null) {
-      print('DEBUG: Supabase Current User ID is null. Returning empty posts list.');
       return [];
     }
-    print('DEBUG: Fetching posts for User ID: $userId');
 
     try {
-      // 1. Fetch Friends
       final friendsResponse = await _supabase
           .from('friendships')
           .select('requester_id, addressee_id')
@@ -76,7 +67,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
         }
       }
 
-      // 2. Fetch all posts (RLS is disabled, so this gets everything)
       final postsResponse = await _supabase
           .from('posts')
           .select('''
@@ -89,31 +79,17 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
       final posts = List<Map<String, dynamic>>.from(postsResponse as List);
 
-      // 3. Client-Side Filtering (Crucial step)
       final filteredPosts = posts.where((post) {
         final visibility = post['visibility'];
         final authorId = post['author_id'];
 
-        // Logging: Check why a specific post is being filtered out
-        // print('Post ID: ${post['id']}, Author: $authorId, Vis: $visibility');
-
-        // Always show user's own posts (A)
         if (authorId == userId) return true;
-
-        // Show public posts (B)
         if (visibility == 'PUBLIC') return true;
-
-        // Show friends posts (C)
         if (visibility == 'FRIENDS' && friendIds.contains(authorId)) return true;
 
-        // Discard all other posts (e.g., 'PRIVATE' or not a friend)
         return false;
       }).toList();
 
-      print('DEBUG: Raw posts fetched: ${posts.length}, Filtered posts to display: ${filteredPosts.length}');
-
-
-      // 4. Fetch Likes and attach counts
       final postIds = filteredPosts.map((p) => p['id'] as String).toList();
       if (postIds.isNotEmpty) {
         final likesResponse = await _supabase
@@ -134,8 +110,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
       return filteredPosts;
     } catch (e) {
-      // to catch and log network/parsing errors
-      print('Error fetching posts: $e');
       return [];
     }
   }
@@ -150,11 +124,17 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     try {
       final response = await _supabase
           .from('resources')
-          .select('id, title, summary, cover_image_url')
+          .select('id, title, summary, cover_image_url, author_id, created_at, author:users!author_id(id, full_name)')
           .order('created_at', ascending: false)
           .limit(3);
 
-      final resources = List<Map<String, dynamic>>.from(response as List);
+      final resources = List<Map<String, dynamic>>.from(response as List).map((r) {
+        return {
+          ...r,
+          'author_name': r['author']?['full_name'],
+          'author_id': r['author']?['id'],
+        };
+      }).toList();
       _cache.set(cacheKey, resources, durationMinutes: 10);
       return resources;
     } catch (e) {
@@ -166,11 +146,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   Future<void> _loadPosts() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId != null) {
-      // It's good practice to clear a specific cache entry on refresh
       _cache.remove('posts_$userId');
     }
     setState(() {
-      _loadData(); // Re-assigns the futures, triggering a rebuild
+      _loadData();
     });
   }
 
@@ -183,7 +162,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     );
 
     if (result == true) {
-      // Only refresh the feed if a new post was created successfully
       _loadPosts();
     }
   }
@@ -202,20 +180,13 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // --- Header Content (Match, Welcome, Resources) ---
             Padding(
               padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Find Your Match Card
                   _buildFindMatchCard(isSmallScreen),
                   SizedBox(height: isSmallScreen ? 12 : 16),
-                  // Welcome Card
-                  //_buildWelcomeCard(isSmallScreen),
-                  //SizedBox(height: isSmallScreen ? 20 : 24),
-
-                  // Resources Section
                   Text(
                     'Resources',
                     style: TextStyle(
@@ -229,7 +200,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
                   SizedBox(height: isSmallScreen ? 20 : 24),
 
-                  // Recent Posts Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -253,8 +223,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
               ),
             ),
 
-            // --- Posts Feed (Main FutureBuilder) ---
-            FutureBuilder<List<Map<String, dynamic>>>(
+            FutureBuilder<List<String, dynamic>>>(
               future: _postsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -267,7 +236,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                 }
 
                 if (snapshot.hasError) {
-                  // Display error if fetching failed
                   return Padding(
                     padding: const EdgeInsets.all(16),
                     child: Card(
@@ -284,12 +252,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
                 final posts = snapshot.data ?? [];
 
-                // --- Empty State UI ---
                 if (posts.isEmpty) {
                   return _buildNoPostsPlaceholder();
                 }
 
-                // --- Display Posts ---
                 final displayPosts = posts.take(3).toList();
                 final hasMorePosts = posts.length > 3;
 
@@ -298,11 +264,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                     ...displayPosts.map((post) {
                       return PostCard(
                         post: post,
-                        onLikeChanged: _loadPosts, // Passing a callback to refresh
+                        onLikeChanged: _loadPosts,
+                        onDeleted: _loadPosts,
                       );
                     }),
 
-                    // View All Button
                     if (hasMorePosts)
                       Padding(
                         padding: const EdgeInsets.all(16),
@@ -412,57 +378,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     );
   }
 
-  // Widget _buildWelcomeCard(bool isSmallScreen) {
-  //   return Container(
-  //     padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
-  //     decoration: BoxDecoration(
-  //       color: const Color(0xFF6A5AE0),
-  //       borderRadius: BorderRadius.circular(12),
-  //     ),
-  //     child: Column(
-  //       children: [
-  //         Text(
-  //           'Welcome to MkuluWanga',
-  //           style: TextStyle(
-  //             color: Colors.white,
-  //             fontSize: isSmallScreen ? 18 : 20,
-  //             fontWeight: FontWeight.bold,
-  //             fontFamily: 'Inter',
-  //           ),
-  //           textAlign: TextAlign.center,
-  //         ),
-  //         const SizedBox(height: 8),
-  //         Text(
-  //           'Share your journey, find support, connect',
-  //           style: TextStyle(
-  //             color: Colors.white70,
-  //             fontSize: isSmallScreen ? 13 : 14,
-  //             fontFamily: 'Inter',
-  //           ),
-  //           textAlign: TextAlign.center,
-  //         ),
-  //         SizedBox(height: isSmallScreen ? 12 : 16),
-  //         ElevatedButton.icon(
-  //           onPressed: _navigateToCreatePost,
-  //           icon: const Icon(Icons.add),
-  //           label: const Text('Create Post'),
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: Colors.white,
-  //             foregroundColor: const Color(0xFF6A5AE0),
-  //             padding: EdgeInsets.symmetric(
-  //               horizontal: isSmallScreen ? 20 : 24,
-  //               vertical: isSmallScreen ? 10 : 12,
-  //             ),
-  //             shape: RoundedRectangleBorder(
-  //               borderRadius: BorderRadius.circular(8),
-  //             ),
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
   Widget _buildResourcesFutureBuilder(bool isSmallScreen) {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _resourcesFuture,
@@ -493,26 +408,113 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
           children: resources.map((resource) {
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: const Icon(
-                  Icons.article,
-                  color: Color(0xFF6A5AE0),
-                ),
-                title: Text(
-                  resource['title'] ?? '',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: isSmallScreen ? 14 : 15,
+              child: InkWell(
+                onTap: () async {
+                  final fullResource = await _supabase
+                      .from('resources')
+                      .select('*, author:users!author_id(id, full_name)')
+                      .eq('id', resource['id'])
+                      .single();
+                  if (context.mounted) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ResourceDetailScreen(
+                          resource: Map<String, dynamic>.from({
+                            ...fullResource,
+                            'author_name': fullResource['author']?['full_name'],
+                            'author_id': fullResource['author']?['id'],
+                          }),
+                        ),
+                      ),
+                    );
+                  }
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.article,
+                            color: Color(0xFF6A5AE0),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              resource['title'] ?? '',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: isSmallScreen ? 15 : 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        resource['summary'] ?? '',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: isSmallScreen ? 12 : 13,
+                          color: Colors.grey[700],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (resource['author_name'] != null) ..[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () {
+                            if (resource['author_id'] != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => UserProfileViewScreen(
+                                    userId: resource['author_id'],
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 10,
+                                backgroundColor: const Color(0xFF6A5AE0).withOpacity(0.1),
+                                child: Text(
+                                  resource['author_name'][0].toUpperCase(),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF6A5AE0),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'By ${resource['author_name']}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey[600],
+                                  fontFamily: 'Inter',
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-                subtitle: Text(
-                  resource['summary'] ?? '',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: isSmallScreen ? 12 : 13,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             );

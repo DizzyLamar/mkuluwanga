@@ -5,11 +5,13 @@ import 'comments_bottom_sheet.dart';
 class PostCard extends StatefulWidget {
   final Map<String, dynamic> post;
   final VoidCallback? onLikeChanged;
+  final VoidCallback? onDeleted;
 
   const PostCard({
     super.key,
     required this.post,
     this.onLikeChanged,
+    this.onDeleted,
   });
 
   @override
@@ -69,7 +71,6 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
         });
       }
     } catch (e) {
-      // Ignore errors
     }
   }
 
@@ -86,7 +87,6 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
         });
       }
     } catch (e) {
-      // Ignore errors
     }
   }
 
@@ -102,7 +102,6 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
 
     try {
       if (_isLiked) {
-        // Unlike
         await _supabase
             .from('post_likes')
             .delete()
@@ -114,7 +113,6 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
           _likesCount = (_likesCount - 1).clamp(0, 999999);
         });
       } else {
-        // Like
         await _supabase.from('post_likes').insert({
           'post_id': widget.post['id'],
           'user_id': userId,
@@ -158,6 +156,91 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
         },
       ),
     );
+  }
+
+  void _showPostOptions() {
+    final userId = _supabase.auth.currentUser?.id;
+    final isOwnPost = userId == widget.post['author_id'];
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isOwnPost)
+                ListTile(
+                  leading: const Icon(Icons.delete, color: Colors.red),
+                  title: const Text(
+                    'Delete Post',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmDeletePost();
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.cancel),
+                title: const Text('Cancel'),
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _confirmDeletePost() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete Post'),
+          content: const Text('Are you sure you want to delete this post? This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _deletePost();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _deletePost() async {
+    try {
+      await _supabase.from('posts').delete().eq('id', widget.post['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Post deleted')),
+        );
+        widget.onDeleted?.call();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting post: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -253,7 +336,12 @@ class _PostCardState extends State<PostCard> with SingleTickerProviderStateMixin
                   color: Colors.grey[600],
                 ),
                 const SizedBox(width: 4),
-                Icon(Icons.more_vert, size: 20, color: Colors.grey[700]),
+                IconButton(
+                  onPressed: _showPostOptions,
+                  icon: Icon(Icons.more_vert, size: 20, color: Colors.grey[700]),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
               ],
             ),
           ),
